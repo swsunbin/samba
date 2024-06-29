@@ -1,140 +1,43 @@
-# simple makefile wrapper to run waf
+#
+# **************************************************************                *
+# *                                                            *
+# * Author: sunbin (2023)                                      *
+# * URL: https://github.com/samba-team/samba				   *
+# *                                                            *
+# * Copyright notice:                                          *
+# * Free use of this C++ Makefile template is permitted under  *
+# * the guidelines and in accordance with the the MIT License  *
+# * http://www.opensource.org/licenses/MIT                     *
+# *                                                            *
+# **************************************************************
+#
 
-WAF_BINARY=$(PYTHON) ./buildtools/bin/waf
-WAF=PYTHONHASHSEED=1 WAF_MAKE=1 $(WAF_BINARY)
+TOPDIR := $(shell /bin/pwd)
+samba_src_dir = $(TOPDIR)
+build_dir = $(TOPDIR)/build
+samba_dir_name = samba-`cat $(samba_src_dir)/samba.spec | grep "%define samba_version" | awk '{print $$3}'`
 
-all:
-	$(WAF) build
+all:  .build_samba
+  
+.build_samba:
+	@(if [ -d $(build_dir) ]; then rm -rf $(build_dir); fi)
+	@(mkdir -p $(build_dir))
+	@(mkdir -p $(build_dir)/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS})
+	@echo "---------- copy samba files ----------"
+	@(cd $(build_dir)/SOURCES; \
+		cp -a $(samba_src_dir)/$(samba_dir_name) $(samba_dir_name); \
+		tar cvf $(samba_dir_name).tar $(samba_dir_name); \
+		xz -T0 $(samba_dir_name).tar; \
+		cp -a $(samba_src_dir)/configfile/* ./; \
+		rm -rf $(samba_dir_name))
+
+	@(cp -af $(samba_src_dir)/samba.spec $(build_dir)/SPECS/)
+
+	@echo "---------- build samba ----------"
+	@(rpmbuild -ba --define="_topdir $(build_dir)" $(build_dir)/SPECS/samba.spec)
 
 install:
-	$(WAF) install
-
-uninstall:
-	$(WAF) uninstall
-
-test:
-	$(WAF) test $(TEST_OPTIONS)
-
-testonly:
-	$(WAF) testonly $(TEST_OPTIONS)
-
-perftest:
-	$(WAF) test --perf-test $(TEST_OPTIONS)
-
-help:
-	@echo NOTE: to run extended waf options use $(WAF_BINARY) or modify your PATH
-	$(WAF) --help
-
-subunit-test:
-	$(WAF) test --filtered-subunit $(TEST_OPTIONS)
-
-testenv:
-	$(WAF) test --testenv $(TEST_OPTIONS)
-
-lcov:
-	@echo usage:
-	@echo ""
-	@echo ./configure --enable-coverage
-	@echo make -j
-	@echo make test TESTS=mytest
-	@echo make lcov
-	@echo ""
-	rm -f lcov.info
-	lcov --capture --directory . --output-file lcov.info && \
-	genhtml lcov.info --output-directory public --prefix=$$(pwd) && \
-	echo Please open public/index.html in browser to view the coverage report
-
-gdbtestenv:
-	$(WAF) test --testenv --gdbtest $(TEST_OPTIONS)
-
-quicktest:
-	$(WAF) test --quick $(TEST_OPTIONS)
-
-randomized-test:
-	$(WAF) test --random-order $(TEST_OPTIONS)
-
-testlist:
-	$(WAF) test --list $(TEST_OPTIONS)
-
-test-nopython:
-	$(WAF) test --no-subunit-filter --test-list=selftest/no-python-tests.txt $(TEST_OPTIONS)
-
-dist:
-	touch .tmplock
-	WAFLOCK=.tmplock $(WAF) dist
-
-distcheck:
-	touch .tmplock
-	WAFLOCK=.tmplock $(WAF) distcheck
-
-printversion:
-	touch .tmplock
-	WAFLOCK=.tmplock $(WAF) printversion
-
+	@(cd $(build_dir)/RPMS/noarch; rpm -vih *.noarch.rpm --force)
+	@(cd $(build_dir)/RPMS/x86_64; rpm -vih *.x86_64.rpm --force)
 clean:
-	$(WAF) clean
-
-distclean:
-	$(WAF) distclean
-
-reconfigure: configure
-	$(WAF) reconfigure
-
-show_waf_options:
-	$(WAF) --help
-
-# some compatibility make targets
-everything: all
-
-testsuite: all
-
-check: test
-
-torture: all
-
-# this should do an install as well, once install is finished
-installcheck: test
-
-etags:
-	$(WAF) etags
-
-ctags:
-	$(WAF) ctags
-
-pep8:
-	$(WAF) pep8
-
-# Adding force on the dependencies will force the target to be always rebuilt from the Make
-# point of view forcing make to invoke waf
-
-bin/smbd: FORCE
-	$(WAF) --targets=smbd/smbd
-
-bin/winbindd: FORCE
-	$(WAF) --targets=winbindd/winbindd
-
-bin/nmbd: FORCE
-	$(WAF) --targets=nmbd/nmbd
-
-bin/smbclient: FORCE
-	$(WAF) --targets=client/smbclient
-
-# this allows for things like "make bin/smbtorture"
-# mainly for the binary that don't have a broken mode like smbd that must
-# be built with smbd/smbd
-bin/%: FORCE
-	$(WAF) --targets=$(subst bin/,,$@)
-
-# Catch all rule to be able to call make service_repl in order to find the name
-# of the submodule you want to build, look at the wscript
-%:
-	$(WAF) --targets=$@
-
-# This rule has to be the last one
-FORCE:
-# Having .NOTPARALLEL will force make to do targets one at a time but still -j
-# will be present in the MAKEFLAGS that are in turn interpreted by WAF
-# so only 1 waf at a time will be called but it will still be able to do parallel builds if
-# instructed to do so
-.NOTPARALLEL: %
-.PHONY: FORCE everything testsuite check torture
+	-rm -rf $(build_dir)
